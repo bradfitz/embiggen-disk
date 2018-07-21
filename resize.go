@@ -109,7 +109,8 @@ func main() {
 		fmt.Println("partition is at max size")
 		return
 	}
-
+	extend := size - end - 2048
+	fmt.Printf("Need to extend disk by %d sectors (%d bytes, %0.03f GiB)\n", extend, extend*512, float64(extend)*512/(1<<30))
 	if needPVExtend {
 		fmt.Println("needs PV extend")
 	}
