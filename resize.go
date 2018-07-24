@@ -33,6 +33,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
+	"unsafe"
 )
 
 const (
@@ -151,13 +153,53 @@ func enlargePartition() (partDev string) {
 		log.Fatalf("sfdisk: %v", err)
 	}
 
-	if out, err := exec.Command("partprobe").Output(); err != nil {
-		if _, err := exec.LookPath("partprobe"); err != nil {
-			log.Fatalf("Program 'partprobe' not found; apt-get install parted ?")
-		}
-		log.Fatalf("partprobe: %v, %s", err, out)
-	}
+	// Tell the kernel.
+	updateKernelPartition(part)
 	return
+}
+
+func updateKernelPartition(part sfdiskLine) {
+	devf, err := os.Open(*dev)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer devf.Close()
+	const (
+		IOCTL_BLKPG            = 0x1269 // #define BLKPG _IO(0x12,105)
+		BLKPG_RESIZE_PARTITION = 3      // from linux/include/uapi/linux/blkpg.h
+	)
+	type blkg_partition struct {
+		start         int64
+		length        int64
+		pno           int32 // partition number
+		_unused_names [128]byte
+	}
+	type blkpg_ioctl_arg struct {
+		op      int32
+		flags   int32
+		datalen int32
+		part    *blkg_partition
+	}
+	var arg = &blkpg_ioctl_arg{
+		op: BLKPG_RESIZE_PARTITION,
+		part: &blkg_partition{
+			start:  part.Start() * 512,
+			length: part.Size() * 512,
+			pno:    int32(part.pno),
+		},
+	}
+	if g, w := unsafe.Sizeof(blkpg_ioctl_arg{}), 24; g != uintptr(w) {
+		log.Fatalf("unsafe.Sizeof(blkg_ioctl_arg) = %v; want C's %v", g, w)
+	}
+	if g, w := unsafe.Sizeof(blkg_partition{}), 152; g != uintptr(w) {
+		log.Fatalf("unsafe.Sizeof(blkg_partition) = %v; want C's %v", g, w)
+	}
+
+	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, uintptr(devf.Fd()), IOCTL_BLKPG, uintptr(unsafe.Pointer(arg))); e != 0 {
+		var err error = syscall.Errno(e)
+		log.Fatalf("ioctl: %v", err)
+	}
+	fmt.Printf("IOCTL_BLKPG updated partition %d to start=%d; end=%d\n", arg.part.pno, arg.part.start, arg.part.length)
 }
 
 func enlargeLVM(partDev string) (vg string) {
@@ -419,6 +461,7 @@ func (pt *partitionTable) Write(w io.Writer) error {
 type sfdiskLine struct {
 	dev  string   // "/dev/sda1"
 	attr []string // key=value or key ("type=83", "bootable", "size=497664")
+	pno  int      //partition number
 }
 
 func (sl sfdiskLine) String() string {
@@ -471,6 +514,7 @@ func getPartitionTable(dev string) *partitionTable {
 		log.Fatal(err)
 	}
 	lines := strings.Split(string(out), "\n")
+	var pno int
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if len(line) == 0 {
@@ -488,7 +532,8 @@ func getPartitionTable(dev string) *partitionTable {
 			}
 			dev := strings.TrimSpace(f[0])
 			rest := strings.TrimSpace(f[1])
-			part := sfdiskLine{dev: dev}
+			pno++
+			part := sfdiskLine{dev: dev, pno: pno}
 			for _, attr := range strings.Split(rest, ",") {
 				attr = strings.TrimSpace(attr)
 				attr = eqRx.ReplaceAllString(attr, "=")
