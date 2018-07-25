@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"unicode"
 )
 
 type lvResizer string // /dev/mapper/debianvg-root
@@ -126,7 +125,7 @@ func (r pvResizer) Resize() error {
 
 func (r pvResizer) DepResizer() (Resizer, error) {
 	dev := string(r)
-	if unicode.IsNumber(rune(dev[len(dev)-1])) {
+	if devEndsInNumber(dev) {
 		return partitionResizer(dev), nil
 	}
 	return nil, nil

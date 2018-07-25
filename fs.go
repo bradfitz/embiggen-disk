@@ -45,7 +45,7 @@ func (e fsResizer) String() string {
 func (e fsResizer) DepResizer() (Resizer, error) {
 	// TODO: use /proc/devices instead and stat the thing to
 	// figure out what it is, rather than using its name.
-	if strings.HasPrefix(e.fs.dev, "/dev/sd") {
+	if strings.HasPrefix(e.fs.dev, "/dev/sd") && devEndsInNumber(e.fs.dev) {
 		return partitionResizer(e.fs.dev), nil
 	}
 	if strings.HasPrefix(e.fs.dev, "/dev/mapper") ||

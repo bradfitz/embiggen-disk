@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
+	"unicode"
 	"unsafe"
 )
 
@@ -109,29 +110,39 @@ func (p partitionResizer) Resize() error {
 
 	extend := remain - endReserve
 	part.SetSize(part.Size() + extend)
+	pt.RemoveMeta("last-lba") // or sfdisk complains
 
 	if *verbose {
 		fmt.Printf("Need to extend disk by %d sectors (%d bytes, %0.03f GiB)\n", extend, extend*512, float64(extend)*512/(1<<30))
 		fmt.Printf("New partition table to write:\n")
-		pt.RemoveMeta("last-lba") // or sfdisk complains
 	}
 
 	var newPart bytes.Buffer
 	pt.Write(&newPart)
-	// fmt.Printf("%s\n", newPart.Bytes())
+	if *verbose {
+		fmt.Printf("%s\n", newPart.Bytes())
+	}
 
 	if *dry {
 		fmt.Printf("[dry-run] would've run sfdisk -f to set new partition table\n")
 		return nil
 	}
 
-	fmt.Println("Setting new partition table...")
+	if *verbose {
+		fmt.Println("Setting new partition table...")
+	}
 	cmd := exec.Command("/sbin/sfdisk", "-f", "--no-reread", "--no-tell-kernel", diskDev)
 	cmd.Stdin = bytes.NewReader(newPart.Bytes())
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	var outBuf bytes.Buffer
+	if *verbose {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	} else {
+		cmd.Stdout = &outBuf
+		cmd.Stderr = &outBuf
+	}
 	if err := cmd.Run(); err != nil {
-		log.Fatalf("sfdisk: %v", err)
+		log.Fatalf("sfdisk: %v: %s", err, outBuf.Bytes())
 	}
 
 	// Tell the kernel.
@@ -327,6 +338,10 @@ func readInt64File(f string) (int64, error) {
 		return 0, err
 	}
 	return n, nil
+}
+
+func devEndsInNumber(d string) bool {
+	return len(d) > 0 && unicode.IsNumber(rune(d[len(d)-1]))
 }
 
 /*
