@@ -14,7 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-// The resize-vm-disk command live resizes a filesystem and LVM objects
+// The embiggen-disk command live resizes a filesystem and LVM objects
 // and partition tables as needed. It's useful within a VM guest to make
 // its filesystem bigger when the hypervisor live resizes the underlying
 // block device.
@@ -41,7 +41,7 @@ func fatalf(format string, args ...interface{}) {
 func main() {
 	flag.Parse()
 	if flag.NArg() != 1 {
-		fatalf("Usage: resize-vm-disk [flags] <mount_point_to_resize>")
+		fatalf("Usage: embiggen-disk [flags] <mount_point_to_resize>")
 	}
 
 	mnt := flag.Arg(0)
