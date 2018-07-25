@@ -6,4 +6,6 @@ partition table.
 
 # Disclaimer
 
+This is not an officially supported Google product.
+
 Audit the code and/or snapshot your disk before use if you're worried about losing data.
