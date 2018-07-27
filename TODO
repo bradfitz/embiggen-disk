@@ -1,0 +1,14 @@
+* tests (use qemu probably)
+
+* verify/fix(?) XFS support
+
+* non-amd64 Linux support? might just work.
+
+* move BLGPKG structs to golang.org/x/sys/unix; in progress
+  in https://golang.org/cl/125642
+
+* add daemon mode to watch dmesg for kernel noticing size
+  changes to block devices and run as needed.
+
+* LUKS support
+
