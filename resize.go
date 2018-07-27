@@ -26,12 +26,25 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
+	"runtime"
 )
 
 var (
 	dry     = flag.Bool("dry-run", false, "don't make changes")
 	verbose = flag.Bool("verbose", false, "verbose output")
 )
+
+func init() {
+	flag.Usage = usage
+}
+
+func usage() {
+	fmt.Fprintf(os.Stderr, "Usage of embiggen-disk:\n\n")
+	fmt.Fprintf(os.Stderr, "# embiggen-disk [flags] <mount-point-to-enlarge>\n\n")
+	flag.PrintDefaults()
+	os.Exit(1)
+}
 
 func fatalf(format string, args ...interface{}) {
 	log.SetFlags(0)
@@ -41,7 +54,10 @@ func fatalf(format string, args ...interface{}) {
 func main() {
 	flag.Parse()
 	if flag.NArg() != 1 {
-		fatalf("Usage: embiggen-disk [flags] <mount_point_to_resize>")
+		usage()
+	}
+	if runtime.GOOS != "linux" {
+		fatalf("embiggen-disk only runs on Linux.")
 	}
 
 	mnt := flag.Arg(0)

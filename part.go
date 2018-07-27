@@ -198,13 +198,6 @@ func updateKernelPartition(diskDev string, part sfdiskLine) error {
 			pno:    int32(part.pno),
 		},
 	}
-	// TODO: remove these once all this in x/sys/unix:
-	if g, w := unsafe.Sizeof(blkpg_ioctl_arg{}), 24; g != uintptr(w) {
-		return fmt.Errorf("unsafe.Sizeof(blkg_ioctl_arg) = %v; want C's %v", g, w)
-	}
-	if g, w := unsafe.Sizeof(blkg_partition{}), 152; g != uintptr(w) {
-		return fmt.Errorf("unsafe.Sizeof(blkg_partition) = %v; want C's %v", g, w)
-	}
 
 	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, uintptr(devf.Fd()), IOCTL_BLKPG, uintptr(unsafe.Pointer(arg))); e != 0 {
 		return syscall.Errno(e)

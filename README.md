@@ -22,6 +22,20 @@ Then again:
 No changes made.
 ```
 
+# Installing
+
+```
+$ go get github.com/google/embiggen-disk
+```
+
+# Requirements
+
+* Go 1.7+
+* Linux 3.6+ (for [BLKPG_RESIZE_PARTITION](https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git/commit/?id=c83f6bf98dc1f1a194118b3830706cebbebda8c4))
+
+It's only been tested on 64-bit x86 Linux ("amd64"). It should work on
+other Linux architectures.
+
 # Disclaimer
 
 This is not an officially supported Google product.
