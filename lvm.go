@@ -97,6 +97,10 @@ func (r lvResizer) State() (string, error) {
 
 func (r lvResizer) Resize() error {
 	lvDev := string(r)
+	if *dry {
+		fmt.Printf("[dry-run] would've run lvextend -l +100%%FREE %s", lvDev)
+		return nil
+	}
 	_, err := exec.Command("lvextend", "-l", "+100%FREE", lvDev).Output()
 	if err != nil {
 		ee, ok := err.(*exec.ExitError)
@@ -132,6 +136,10 @@ func (r pvResizer) State() (string, error) {
 
 func (r pvResizer) Resize() error {
 	dev := string(r)
+	if *dry {
+		fmt.Printf("[dry-run] would've run pvresize %v", dev)
+		return nil
+	}
 	out, err := exec.Command("pvresize", dev).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("pvresize %s: %v, %s", dev, err, out)
