@@ -1,6 +1,6 @@
-# embiggendisk
+# embiggen-disk
 
-The **embiggdendisk** tool live-resizes a filesystem after first live-resizing
+The **embiggen-disk** tool live-resizes a filesystem after first live-resizing
 any necessary layers below it: an optional LVM LV and PV, and an MBR or GPT
 partition table.
 
