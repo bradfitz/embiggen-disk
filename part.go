@@ -31,6 +31,8 @@ import (
 	"syscall"
 	"unicode"
 	"unsafe"
+
+	"golang.org/x/sys/unix"
 )
 
 const (
@@ -174,32 +176,16 @@ func updateKernelPartition(diskDev string, part sfdiskLine) error {
 		return err
 	}
 	defer devf.Close()
-	const (
-		IOCTL_BLKPG            = 0x1269 // #define BLKPG _IO(0x12,105)
-		BLKPG_RESIZE_PARTITION = 3      // from linux/include/uapi/linux/blkpg.h
-	)
-	type blkg_partition struct {
-		start         int64
-		length        int64
-		pno           int32 // partition number
-		_unused_names [128]byte
-	}
-	type blkpg_ioctl_arg struct {
-		op      int32
-		flags   int32
-		datalen int32
-		part    *blkg_partition
-	}
-	var arg = &blkpg_ioctl_arg{
-		op: BLKPG_RESIZE_PARTITION,
-		part: &blkg_partition{
-			start:  part.Start() * 512,
-			length: part.Size() * 512,
-			pno:    int32(part.pno),
-		},
+	arg := &unix.BlkpgIoctlArg{
+		Op: unix.BLKPG_RESIZE_PARTITION,
+		Data: (*byte)(unsafe.Pointer(&unix.BlkpgPartition{
+			Start:  part.Start() * 512,
+			Length: part.Size() * 512,
+			Pno:    int32(part.pno),
+		})),
 	}
 
-	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, uintptr(devf.Fd()), IOCTL_BLKPG, uintptr(unsafe.Pointer(arg))); e != 0 {
+	if _, _, e := syscall.Syscall(syscall.SYS_IOCTL, uintptr(devf.Fd()), unix.BLKPG, uintptr(unsafe.Pointer(arg))); e != 0 {
 		return syscall.Errno(e)
 	}
 	return nil
