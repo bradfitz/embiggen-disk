@@ -73,7 +73,7 @@ func (e fsResizer) DepResizer() (Resizer, error) {
 
 func (e fsResizer) Resize() error {
 	if *dry {
-		fmt.Println("[dry-run] would've run %v %v", e.cmd.Path, e.cmd.Args)
+		fmt.Printf("[dry-run] would've run %v %v\n", e.cmd.Path, e.cmd.Args)
 		return nil
 	}
 	out, err := e.cmd.CombinedOutput()
