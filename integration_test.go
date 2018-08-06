@@ -63,6 +63,7 @@ func init() {
 	// Be verbose in the qemu guest. We'll filter it out in the parent.
 	flag.Lookup("test.v").Value.Set("true")
 
+	// Mount things expected by various tools (sfdisk, lsblk, etc).
 	for _, mnt := range []struct {
 		dev, path, fstype string
 	}{
@@ -159,7 +160,7 @@ func TestInQemu(t *testing.T) {
 		"-kernel", kernelPath,
 		"-initrd", initrdPath,
 		"-no-reboot",
-		"-append", "console=ttyS0,115200 panic=-1 ip=dhcp")
+		"-append", "console=ttyS0,115200 panic=-1 acpi=off nosmp ip=dhcp")
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	err = cmd.Run()
