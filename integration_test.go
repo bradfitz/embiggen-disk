@@ -63,14 +63,17 @@ func init() {
 	// Be verbose in the qemu guest. We'll filter it out in the parent.
 	flag.Lookup("test.v").Value.Set("true")
 
-	var err error
-
-	err = unix.Mount("sysfs", "/sys", "sysfs", 0, "")
-	fmt.Printf(":: sysfs mount = %v\n", err)
-	err = unix.Mount("proc", "/proc", "proc", 0, "")
-	fmt.Printf(":: proc mount = %v\n", err)
-	err = unix.Mount("udev", "/dev", "devtmpfs", 0, "")
-	fmt.Printf(":: dev mount = %v\n", err)
+	for _, mnt := range []struct {
+		dev, path, fstype string
+	}{
+		{"sysfs", "/sys", "sysfs"},
+		{"proc", "/proc", "proc"},
+		{"udev", "/dev", "devtmpfs"},
+	} {
+		if err := unix.Mount(mnt.dev, mnt.path, mnt.fstype, 0, ""); err != nil {
+			log.Fatalf("failed to mount %s: %v", mnt.path, err)
+		}
+	}
 }
 
 var inQemu = os.Getpid() == 1
@@ -168,9 +171,7 @@ func TestQMP(t *testing.T) {
 	if !inQemu {
 		t.Skipf("not in VM")
 	}
-	println("pre-dial")
 	c, err := net.Dial("tcp", "10.0.2.100:1234")
-	println("dial=", c, err)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,13 +185,14 @@ func TestQMP(t *testing.T) {
 	fmt.Printf("Got: %#v\n", msg)
 
 	io.WriteString(c, `{ "execute": "qmp_capabilities" }`)
-
+	msg = nil
 	if err := jd.Decode(&msg); err != nil {
 		t.Fatal(err)
 	}
 	fmt.Printf("Got2: %#v\n", msg)
 
 	io.WriteString(c, `{ "execute": "query-block" }`)
+	msg = nil
 	if err := jd.Decode(&msg); err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +211,9 @@ func TestLsblk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lsblk error: %v, %s", err, out)
 	}
-	t.Logf("lsblk: %s", out)
+	if len(out) > 0 {
+		t.Errorf("unexpected lsblk output: %s", out)
+	}
 }
 
 func downloadKernel(dst string) error {
