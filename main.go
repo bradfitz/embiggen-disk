@@ -75,7 +75,7 @@ func main() {
 		fmt.Printf("No changes made.\n")
 	}
 	if err != nil {
-		fatalf("enlarging %s: %v", mnt, err)
+		fatalf("error: %v", err)
 	}
 }
 
