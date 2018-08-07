@@ -20,7 +20,7 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
+	"bytes"
 	"flag"
 	"fmt"
 	"io"
@@ -113,7 +113,7 @@ func TestInQemu(t *testing.T) {
 		t.Fatalf("failed to generate/write initrd: %v", err)
 	}
 
-	qmpSockPath := filepath.Join(td, "qmpsock")
+	monSockPath := filepath.Join(td, "monsock")
 
 	ln, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
@@ -126,7 +126,7 @@ func TestInQemu(t *testing.T) {
 			if err != nil {
 				return
 			}
-			mon, err := net.Dial("unix", qmpSockPath)
+			mon, err := net.Dial("unix", monSockPath)
 			if err != nil {
 				c.Close()
 				log.Printf("dial unix to monitor failed: %v", err)
@@ -152,7 +152,7 @@ func TestInQemu(t *testing.T) {
 		"-nographic",
 		"-m", "256",
 		"-display", "none",
-		"-qmp", "unix:"+qmpSockPath+",server,nowait",
+		"-monitor", "unix:"+monSockPath+",server,nowait",
 		"-device", "virtio-net,netdev=net0",
 		"-netdev", "user,id=net0,guestfwd=tcp:10.0.2.100:1234-tcp:"+ln.Addr().String(),
 		"-device", "virtio-serial",
@@ -167,40 +167,69 @@ func TestInQemu(t *testing.T) {
 	t.Logf("Run = %v", err)
 }
 
-// test hitting the QMP server from the guest
-func TestQMP(t *testing.T) {
-	if !inQemu {
-		t.Skipf("not in VM")
-	}
+type monClient struct {
+	c   net.Conn
+	buf bytes.Buffer
+}
+
+func dialMon(t *testing.T) *monClient {
 	c, err := net.Dial("tcp", "10.0.2.100:1234")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer c.Close()
-
-	jd := json.NewDecoder(c)
-	var msg map[string]interface{}
-	if err := jd.Decode(&msg); err != nil {
-		t.Fatal(err)
+	mc := &monClient{c: c}
+	if _, err := mc.readToPrompt(); err != nil {
+		t.Fatalf("readToPrompt: %v", err)
 	}
-	fmt.Printf("Got: %#v\n", msg)
+	return mc
+}
 
-	io.WriteString(c, `{ "execute": "qmp_capabilities" }`)
-	msg = nil
-	if err := jd.Decode(&msg); err != nil {
-		t.Fatal(err)
+func (mc *monClient) close() { mc.c.Close() }
+
+var (
+	qemuPrompt = []byte("\r\n(qemu) ")
+	ansiCSI_K  = []byte("\x1b[K") // CSI K: Erase in Line; n == 0: clear from cursor to the end of the line
+)
+
+func (mc *monClient) readToPrompt() (pre string, err error) {
+	buf := make([]byte, 100)
+	for {
+		n, err := mc.c.Read(buf)
+		if err != nil {
+			return "", err
+		}
+		mc.buf.Write(buf[:n])
+		have := mc.buf.Bytes()
+		if bytes.HasSuffix(have, qemuPrompt) {
+			mc.buf.Reset()
+			ret := bytes.TrimSuffix(have, qemuPrompt)
+			if i := bytes.LastIndex(ret, ansiCSI_K); i != -1 {
+				ret = ret[i+len(ansiCSI_K):]
+			}
+			return strings.TrimSpace(strings.Replace(string(ret), "\r\n", "\n", -1)), nil
+		}
 	}
-	fmt.Printf("Got2: %#v\n", msg)
+}
 
-	io.WriteString(c, `{ "execute": "query-block" }`)
-	msg = nil
-	if err := jd.Decode(&msg); err != nil {
-		t.Fatal(err)
+func (mc *monClient) run(cmd string) (out string, err error) {
+	if _, err := fmt.Fprintf(mc.c, "%s\n", cmd); err != nil {
+		return "", err
 	}
-	fmt.Printf("Got3: %#v\n", msg)
+	return mc.readToPrompt()
+}
 
-	//io.WriteString(c, `{ "execute": "quit" }`)
+func TestMon(t *testing.T) {
+	if !inQemu {
+		t.Skipf("not in VM")
+	}
+	mc := dialMon(t)
+	defer mc.close()
 
+	if out, err := mc.run("info block"); err != nil {
+		t.Fatal(err)
+	} else {
+		t.Logf("info block: %q", out)
+	}
 }
 
 // test running lsblk in the guest
