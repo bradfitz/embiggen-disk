@@ -31,6 +31,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -60,9 +61,6 @@ func init() {
 
 	fmt.Println(":: hello from userspace")
 
-	// Be verbose in the qemu guest. We'll filter it out in the parent.
-	flag.Lookup("test.v").Value.Set("true")
-
 	// Mount things expected by various tools (sfdisk, lsblk, etc).
 	for _, mnt := range []struct {
 		dev, path, fstype string
@@ -75,6 +73,17 @@ func init() {
 			log.Fatalf("failed to mount %s: %v", mnt.path, err)
 		}
 	}
+
+	// Now that /proc is mounted, get our arguments we passed to the kernel.
+	if all, err := ioutil.ReadFile("/proc/cmdline"); err != nil {
+		log.Fatal(err)
+	} else {
+		kernelCmdLineFields = strings.Fields(string(all))
+	}
+
+	// Be verbose in the qemu guest. We'll filter it out in the parent.
+	flag.Lookup("test.v").Value.Set("true")
+	flag.Lookup("test.run").Value.Set(kernelParam("goTestRun"))
 }
 
 var inQemu = os.Getpid() == 1
@@ -183,7 +192,8 @@ func TestInQemu(t *testing.T) {
 		"-kernel", kernelPath,
 		"-initrd", initrdPath,
 		"-no-reboot",
-		"-append", "console=ttyS0,115200 panic=-1 acpi=off nosmp ip=dhcp parentTempDir="+td)
+		"-append", "console=ttyS0,115200 panic=-1 acpi=off nosmp ip=dhcp "+
+			"parentTempDir="+td+" goTestRun="+flag.Lookup("test.run").Value.String())
 	var out bytes.Buffer
 	var std io.Writer = &out
 	const verbose = true
@@ -260,7 +270,10 @@ func (mc *monClient) run(cmd string) (out string, err error) {
 }
 
 func (mc *monClient) addDisk(t *testing.T, diskBase string) {
-	tempDir := parentTempDir(t)
+	tempDir := kernelParam("parentTempDir")
+	if tempDir == "" {
+		t.Fatal("missing kernel parameter parentTempDir")
+	}
 	out, err := mc.run("drive_add 0 file=" + filepath.Join(tempDir, diskBase+".qcow2") + ",if=none,id=" + diskBase)
 	if err != nil {
 		t.Fatalf("drive_add %q: %v", diskBase, err)
@@ -310,7 +323,7 @@ func testMke2fs(t *testing.T) {
 
 	st := lsblk(t)
 	if !st.contains("sda") {
-		t.Fatalf("expected lsblk to contain sda: got: %s", st.out)
+		t.Fatalf("expected lsblk to contain sda: got: %s", st)
 	}
 
 	// Generate partition
@@ -323,10 +336,10 @@ func testMke2fs(t *testing.T) {
 
 	st = lsblk(t)
 	if !st.contains("sda1") {
-		t.Fatalf("expected lsblk to contain sda1: got: %s", st.out)
+		t.Fatalf("expected lsblk to contain sda1: got: %s", st)
 	}
-	if st.contains("sda2") {
-		t.Fatalf("unexpected sda2: %s", st.out)
+	if len(st) != 2 {
+		t.Fatalf("wanted 2 devices, got: %s", st)
 	}
 
 	// Make a filesystem on it!
@@ -339,28 +352,76 @@ func testMke2fs(t *testing.T) {
 		t.Fatalf("mount: %v", err)
 	}
 
-	t.Logf("Final state: %s", lsblk(t).out)
+	t.Logf("Final state: %s", lsblk(t))
 
 	if err := unix.Unmount("/mnt/a/", 0); err != nil {
 		t.Fatalf("unmount: %v", err)
 	}
 }
 
-type lsblkState struct {
-	out string
+type lsblkItem struct {
+	Name  string
+	Size  int64
+	Type  string
+	Mount string
 }
 
-func lsblk(t *testing.T) *lsblkState {
+type lsblkState []lsblkItem
+
+func lsblk(t *testing.T) lsblkState {
 	t.Helper()
-	out, err := exec.Command("/bin/lsblk").CombinedOutput()
+	out, err := exec.Command("/bin/lsblk", "-b", "-l").CombinedOutput()
 	if err != nil {
 		t.Fatalf("lsblk error: %v, %s", err, out)
 	}
-	return &lsblkState{out: string(out)}
+	lines := strings.Split(string(out), "\n")
+	var st lsblkState
+	if len(lines) == 0 {
+		return nil
+	}
+	/* Parse:
+	NAME         MAJ:MIN RM         SIZE RO TYPE  MOUNTPOINT
+	sda            8:0    0 107374182400  0 disk
+	sda1           8:1    0    254803968  0 part  /boot
+	sda2           8:2    0         1024  0 part
+	*/
+	for _, line := range lines[1:] {
+		f := strings.Fields(line)
+		if len(f) < 6 {
+			continue
+		}
+		it := lsblkItem{
+			Name: f[0],
+			Type: f[5],
+		}
+		if len(f) == 7 {
+			it.Mount = f[6]
+		}
+		it.Size, _ = strconv.ParseInt(f[3], 10, 64)
+		st = append(st, it)
+	}
+	return st
 }
 
-func (s *lsblkState) contains(dev string) bool {
-	return strings.Contains(s.out, dev) && strings.Contains(s.out, dev+" ")
+func (s lsblkState) contains(dev string) bool {
+	for _, it := range s {
+		if it.Name == dev {
+			return true
+		}
+	}
+	return false
+}
+
+func (s lsblkState) String() string {
+	var buf bytes.Buffer
+	for _, it := range s {
+		fmt.Fprintf(&buf, "%s %s %d", it.Type, it.Name, it.Size)
+		if it.Mount != "" {
+			fmt.Fprintf(&buf, " at %s", it.Mount)
+		}
+		buf.WriteByte('\n')
+	}
+	return buf.String()
 }
 
 func init() {
@@ -508,25 +569,15 @@ func rootFSFiles(initProg string) []string {
 	return files
 }
 
-var parentTempDirCached string
+var kernelCmdLineFields []string
 
-func parentTempDir(t *testing.T) string {
-	if v := parentTempDirCached; v != "" {
-		return v
-	}
-	all, err := ioutil.ReadFile("/proc/cmdline")
-	if err != nil {
-		t.Fatalf("looking up parentTempDir: %v", err)
-	}
-	fs := strings.Fields(string(all))
-	const pfx = "parentTempDir="
-	for _, f := range fs {
-		if strings.HasPrefix(f, pfx) {
-			v := f[len(pfx):]
-			parentTempDirCached = v
-			return v
+func kernelParam(k string) string {
+	for _, f := range kernelCmdLineFields {
+		if strings.HasPrefix(f, k) &&
+			len(f) > len(k)+1 &&
+			f[len(k)] == '=' {
+			return f[len(k)+1:]
 		}
 	}
-	t.Fatal("failed to find parentTempDir kernel command line")
 	return ""
 }
