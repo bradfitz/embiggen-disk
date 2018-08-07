@@ -87,9 +87,23 @@ func TestMain(m *testing.M) {
 	os.Exit(status)
 }
 
+var qemuTests []string
+var qemuTest = map[string]func(*testing.T){}
+
+func addQemuTest(name string, fn func(*testing.T)) {
+	if _, dup := qemuTest[name]; dup {
+		panic(fmt.Sprintf("duplicate qemu test %q", name))
+	}
+	qemuTests = append(qemuTests, name)
+	qemuTest[name] = fn
+}
+
 func TestInQemu(t *testing.T) {
 	if inQemu {
-		t.Skipf("already in qemu")
+		for _, name := range qemuTests {
+			t.Run(name, qemuTest[name])
+		}
+		return
 	}
 	if testing.Short() {
 		t.Skip("skipping in short mode")
@@ -115,6 +129,14 @@ func TestInQemu(t *testing.T) {
 
 	monSockPath := filepath.Join(td, "monsock")
 
+	// Create some disks to work with.
+	for _, name := range []string{"foo"} {
+		err := exec.Command("qemu-img", "create", "-f", "qcow2", filepath.Join(td, name+".qcow2"), "10G").Run()
+		if err != nil {
+			t.Fatalf("creating %s qcow2: %v", name, err)
+		}
+	}
+
 	ln, err := net.Listen("tcp", "localhost:0")
 	if err != nil {
 		log.Fatal(err)
@@ -133,7 +155,6 @@ func TestInQemu(t *testing.T) {
 				return
 			}
 			go func() {
-				defer c.Close()
 				errc := make(chan error, 1)
 				go func() {
 					_, err := io.Copy(c, mon)
@@ -144,6 +165,8 @@ func TestInQemu(t *testing.T) {
 					errc <- err
 				}()
 				<-errc
+				c.Close()
+				mon.Close()
 			}()
 		}
 	}()
@@ -160,7 +183,7 @@ func TestInQemu(t *testing.T) {
 		"-kernel", kernelPath,
 		"-initrd", initrdPath,
 		"-no-reboot",
-		"-append", "console=ttyS0,115200 panic=-1 acpi=off nosmp ip=dhcp")
+		"-append", "console=ttyS0,115200 panic=-1 acpi=off nosmp ip=dhcp parentTempDir="+td)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	err = cmd.Run()
@@ -172,7 +195,15 @@ type monClient struct {
 	buf bytes.Buffer
 }
 
+var monClientCache *monClient
+
 func dialMon(t *testing.T) *monClient {
+	if mc := monClientCache; mc != nil {
+		return mc
+	}
+	if os.Getpid() != 1 {
+		panic("dialMon is meant for tests in qemu")
+	}
 	c, err := net.Dial("tcp", "10.0.2.100:1234")
 	if err != nil {
 		t.Fatal(err)
@@ -181,10 +212,9 @@ func dialMon(t *testing.T) *monClient {
 	if _, err := mc.readToPrompt(); err != nil {
 		t.Fatalf("readToPrompt: %v", err)
 	}
+	monClientCache = mc
 	return mc
 }
-
-func (mc *monClient) close() { mc.c.Close() }
 
 var (
 	qemuPrompt = []byte("\r\n(qemu) ")
@@ -218,13 +248,40 @@ func (mc *monClient) run(cmd string) (out string, err error) {
 	return mc.readToPrompt()
 }
 
-func TestMon(t *testing.T) {
-	if !inQemu {
-		t.Skipf("not in VM")
+func (mc *monClient) addDisk(t *testing.T, diskBase string) {
+	tempDir := parentTempDir(t)
+	out, err := mc.run("drive_add 0 file=" + filepath.Join(tempDir, diskBase+".qcow2") + ",if=none,id=" + diskBase)
+	if err != nil {
+		t.Fatalf("drive_add %q: %v", diskBase, err)
 	}
-	mc := dialMon(t)
-	defer mc.close()
+	if out != "OK" {
+		t.Fatalf("drive_add %q: %s", diskBase, out)
+	}
 
+	out, err = mc.run("device_add scsi-hd,drive=" + diskBase + ",id=" + diskBase)
+	if err != nil {
+		t.Fatalf("device_add %q: %v", diskBase, err)
+	}
+	if len(out) > 0 {
+		t.Logf("device_add %q: %s", diskBase, out)
+	}
+}
+
+func (mc *monClient) removeDisk(t *testing.T, diskBase string) {
+	out, err := mc.run("device_del " + diskBase)
+	if err != nil {
+		t.Fatalf("device_del %q: %v", diskBase, err)
+	}
+	if len(out) > 0 {
+		t.Logf("device_del %q: %s", diskBase, out)
+	}
+}
+
+func init() {
+	addQemuTest("Mon", testMon)
+}
+func testMon(t *testing.T) {
+	mc := dialMon(t)
 	if out, err := mc.run("info block"); err != nil {
 		t.Fatal(err)
 	} else {
@@ -232,11 +289,27 @@ func TestMon(t *testing.T) {
 	}
 }
 
-// test running lsblk in the guest
-func TestLsblk(t *testing.T) {
-	if !inQemu {
-		t.Skipf("not in VM")
+func init() {
+	addQemuTest("Mke2fs", testMke2fs)
+}
+func testMke2fs(t *testing.T) {
+	mc := dialMon(t)
+	mc.addDisk(t, "foo")
+	defer mc.removeDisk(t, "foo")
+	out, err := exec.Command("/bin/lsblk").CombinedOutput()
+	if err != nil {
+		t.Fatalf("lsblk error: %v, %s", err, out)
 	}
+	if len(out) == 0 {
+		t.Errorf("empty lsblk output")
+	}
+	t.Logf("lsblk: %s", out)
+}
+
+func init() {
+	addQemuTest("Lsblk", testLsblk)
+}
+func testLsblk(t *testing.T) {
 	out, err := exec.Command("/bin/lsblk").CombinedOutput()
 	if err != nil {
 		t.Fatalf("lsblk error: %v, %s", err, out)
@@ -372,4 +445,27 @@ func rootFSFiles(initProg string) []string {
 	}
 	sort.Strings(files)
 	return files
+}
+
+var parentTempDirCached string
+
+func parentTempDir(t *testing.T) string {
+	if v := parentTempDirCached; v != "" {
+		return v
+	}
+	all, err := ioutil.ReadFile("/proc/cmdline")
+	if err != nil {
+		t.Fatalf("looking up parentTempDir: %v", err)
+	}
+	fs := strings.Fields(string(all))
+	const pfx = "parentTempDir="
+	for _, f := range fs {
+		if strings.HasPrefix(f, pfx) {
+			v := f[len(pfx):]
+			parentTempDirCached = v
+			return v
+		}
+	}
+	t.Fatal("failed to find parentTempDir kernel command line")
+	return ""
 }
