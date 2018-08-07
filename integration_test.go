@@ -30,6 +30,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -96,21 +97,16 @@ func TestMain(m *testing.M) {
 	os.Exit(status)
 }
 
-var qemuTests []string
-var qemuTest = map[string]func(*testing.T){}
-
-func addQemuTest(name string, fn func(*testing.T)) {
-	if _, dup := qemuTest[name]; dup {
-		panic(fmt.Sprintf("duplicate qemu test %q", name))
-	}
-	qemuTests = append(qemuTests, name)
-	qemuTest[name] = fn
-}
+// QemuTest is the type on which all the methods for tests that run
+// under Qemu as root/PID=1 run.
+type QemuTest struct{}
 
 func TestInQemu(t *testing.T) {
 	if inQemu {
-		for _, name := range qemuTests {
-			t.Run(name, qemuTest[name])
+		rv := reflect.ValueOf(QemuTest{})
+		tv := rv.Type()
+		for i := 0; i < rv.NumMethod(); i++ {
+			t.Run(tv.Method(i).Name, rv.Method(i).Interface().(func(*testing.T)))
 		}
 		return
 	}
@@ -301,10 +297,7 @@ func (mc *monClient) removeDisk(t *testing.T, diskBase string) {
 	}
 }
 
-func init() {
-	addQemuTest("Mon", testMon)
-}
-func testMon(t *testing.T) {
+func (QemuTest) Mon(t *testing.T) {
 	mc := dialMon(t)
 	if out, err := mc.run("info block"); err != nil {
 		t.Fatal(err)
@@ -313,10 +306,7 @@ func testMon(t *testing.T) {
 	}
 }
 
-func init() {
-	addQemuTest("Mke2fs", testMke2fs)
-}
-func testMke2fs(t *testing.T) {
+func (QemuTest) Mke2fs(t *testing.T) {
 	mc := dialMon(t)
 	mc.addDisk(t, "foo")
 	defer mc.removeDisk(t, "foo")
@@ -424,10 +414,7 @@ func (s lsblkState) String() string {
 	return buf.String()
 }
 
-func init() {
-	addQemuTest("Lsblk", testLsblk)
-}
-func testLsblk(t *testing.T) {
+func (QemuTest) Lsblk(t *testing.T) {
 	out, err := exec.Command("/bin/lsblk").CombinedOutput()
 	if err != nil {
 		t.Fatalf("lsblk error: %v, %s", err, out)
