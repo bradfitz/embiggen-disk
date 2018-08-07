@@ -184,10 +184,21 @@ func TestInQemu(t *testing.T) {
 		"-initrd", initrdPath,
 		"-no-reboot",
 		"-append", "console=ttyS0,115200 panic=-1 acpi=off nosmp ip=dhcp parentTempDir="+td)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	var out bytes.Buffer
+	var std io.Writer = &out
+	const verbose = true
+	if verbose {
+		std = io.MultiWriter(std, os.Stderr)
+	}
+	cmd.Stdout = std
+	cmd.Stderr = std
 	err = cmd.Run()
-	t.Logf("Run = %v", err)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if !bytes.Contains(out.Bytes(), []byte("\n:: exit=0")) {
+		t.Error("non-zero exit status")
+	}
 }
 
 type monClient struct {
