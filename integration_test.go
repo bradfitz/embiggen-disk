@@ -307,14 +307,60 @@ func testMke2fs(t *testing.T) {
 	mc := dialMon(t)
 	mc.addDisk(t, "foo")
 	defer mc.removeDisk(t, "foo")
+
+	st := lsblk(t)
+	if !st.contains("sda") {
+		t.Fatalf("expected lsblk to contain sda: got: %s", st.out)
+	}
+
+	// Generate partition
+	cmd := exec.Command("/sbin/sfdisk", "-f", "/dev/sda")
+	cmd.Stdin = strings.NewReader("start=2048, type=83")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("sfdisk: %v, %s", err, out)
+	}
+
+	st = lsblk(t)
+	if !st.contains("sda1") {
+		t.Fatalf("expected lsblk to contain sda1: got: %s", st.out)
+	}
+	if st.contains("sda2") {
+		t.Fatalf("unexpected sda2: %s", st.out)
+	}
+
+	// Make a filesystem on it!
+	if out, err := exec.Command("/sbin/mke2fs", "/dev/sda1").CombinedOutput(); err != nil {
+		t.Fatalf("mke2fs: %v, %s", err, out)
+	}
+
+	// Mount it.
+	if err := unix.Mount("/dev/sda1", "/mnt/a", "ext4", 0, ""); err != nil {
+		t.Fatalf("mount: %v", err)
+	}
+
+	t.Logf("Final state: %s", lsblk(t).out)
+
+	if err := unix.Unmount("/mnt/a/", 0); err != nil {
+		t.Fatalf("unmount: %v", err)
+	}
+}
+
+type lsblkState struct {
+	out string
+}
+
+func lsblk(t *testing.T) *lsblkState {
+	t.Helper()
 	out, err := exec.Command("/bin/lsblk").CombinedOutput()
 	if err != nil {
 		t.Fatalf("lsblk error: %v, %s", err, out)
 	}
-	if len(out) == 0 {
-		t.Errorf("empty lsblk output")
-	}
-	t.Logf("lsblk: %s", out)
+	return &lsblkState{out: string(out)}
+}
+
+func (s *lsblkState) contains(dev string) bool {
+	return strings.Contains(s.out, dev) && strings.Contains(s.out, dev+" ")
 }
 
 func init() {
@@ -379,6 +425,10 @@ func genRootFS(dst string) error {
 		cpio.Directory("proc", 0755),
 		cpio.Directory("sys", 0755),
 		cpio.Directory("dev", 0755),
+		cpio.Directory("mnt", 0755),
+		cpio.Directory("mnt/a", 0755),
+		cpio.Directory("mnt/b", 0755),
+		cpio.Directory("mnt/c", 0755),
 	}
 	for _, rec := range extraRec {
 		if err := recw.WriteRecord(rec); err != nil {
