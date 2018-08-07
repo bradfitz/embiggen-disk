@@ -54,11 +54,14 @@ const (
 	kernelObj = "07f3c3a7d08340bdc292cf483cad9ff6cd0938d7"
 )
 
+var inQemu bool
+
 func init() {
 	if os.Getpid() != 1 {
 		// Not in qemu.
 		return
 	}
+	inQemu = true
 
 	fmt.Println(":: hello from userspace")
 
@@ -82,17 +85,23 @@ func init() {
 		kernelCmdLineFields = strings.Fields(string(all))
 	}
 
+	// Connect to the monitor.
+	var err error
+	monc, err = dialMon()
+	if err != nil {
+		log.Fatalf("dialing monitor: %v", err)
+	}
+
 	// Be verbose in the qemu guest. We'll filter it out in the parent.
 	flag.Lookup("test.v").Value.Set("true")
 	flag.Lookup("test.run").Value.Set(kernelParam("goTestRun"))
 }
 
-var inQemu = os.Getpid() == 1
-
 func TestMain(m *testing.M) {
 	status := m.Run()
 	if inQemu {
 		fmt.Printf(":: exit=%d\n", status)
+		monc.run("quit") // to avoid a kernel panic with init exiting
 	}
 	os.Exit(status)
 }
@@ -212,25 +221,21 @@ type monClient struct {
 	buf bytes.Buffer
 }
 
-var monClientCache *monClient
+var monc *monClient
 
-func dialMon(t *testing.T) *monClient {
-	if mc := monClientCache; mc != nil {
-		return mc
-	}
-	if os.Getpid() != 1 {
+func dialMon() (*monClient, error) {
+	if !inQemu {
 		panic("dialMon is meant for tests in qemu")
 	}
 	c, err := net.Dial("tcp", "10.0.2.100:1234")
 	if err != nil {
-		t.Fatal(err)
+		return nil, err
 	}
 	mc := &monClient{c: c}
 	if _, err := mc.readToPrompt(); err != nil {
-		t.Fatalf("readToPrompt: %v", err)
+		return nil, err
 	}
-	monClientCache = mc
-	return mc
+	return mc, nil
 }
 
 var (
@@ -270,7 +275,7 @@ func (mc *monClient) addDisk(t *testing.T, diskBase string) {
 	if tempDir == "" {
 		t.Fatal("missing kernel parameter parentTempDir")
 	}
-	out, err := mc.run("drive_add 0 file=" + filepath.Join(tempDir, diskBase+".qcow2") + ",if=none,id=" + diskBase)
+	out, err := monc.run("drive_add 0 file=" + filepath.Join(tempDir, diskBase+".qcow2") + ",if=none,id=" + diskBase)
 	if err != nil {
 		t.Fatalf("drive_add %q: %v", diskBase, err)
 	}
@@ -278,7 +283,7 @@ func (mc *monClient) addDisk(t *testing.T, diskBase string) {
 		t.Fatalf("drive_add %q: %s", diskBase, out)
 	}
 
-	out, err = mc.run("device_add scsi-hd,drive=" + diskBase + ",id=" + diskBase)
+	out, err = monc.run("device_add scsi-hd,drive=" + diskBase + ",id=" + diskBase)
 	if err != nil {
 		t.Fatalf("device_add %q: %v", diskBase, err)
 	}
@@ -288,7 +293,7 @@ func (mc *monClient) addDisk(t *testing.T, diskBase string) {
 }
 
 func (mc *monClient) removeDisk(t *testing.T, diskBase string) {
-	out, err := mc.run("device_del " + diskBase)
+	out, err := monc.run("device_del " + diskBase)
 	if err != nil {
 		t.Fatalf("device_del %q: %v", diskBase, err)
 	}
@@ -298,8 +303,7 @@ func (mc *monClient) removeDisk(t *testing.T, diskBase string) {
 }
 
 func (QemuTest) Mon(t *testing.T) {
-	mc := dialMon(t)
-	if out, err := mc.run("info block"); err != nil {
+	if out, err := monc.run("info block"); err != nil {
 		t.Fatal(err)
 	} else {
 		t.Logf("info block: %q", out)
@@ -307,9 +311,8 @@ func (QemuTest) Mon(t *testing.T) {
 }
 
 func (QemuTest) Mke2fs(t *testing.T) {
-	mc := dialMon(t)
-	mc.addDisk(t, "foo")
-	defer mc.removeDisk(t, "foo")
+	monc.addDisk(t, "foo")
+	defer monc.removeDisk(t, "foo")
 
 	st := lsblk(t)
 	if !st.contains("sda") {
