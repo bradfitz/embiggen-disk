@@ -292,6 +292,14 @@ func (mc *monClient) addDisk(t *testing.T, diskBase string) {
 	}
 }
 
+func (mc *monClient) resizeDisk(t *testing.T, diskBase, newSize string) {
+	out, err := monc.run("block_resize " + diskBase + " " + newSize)
+	if err != nil {
+		t.Fatalf("block_resize %s %s: %v", diskBase, newSize, err)
+	}
+	t.Logf("output of block_resize: %q", out)
+}
+
 func (mc *monClient) removeDisk(t *testing.T, diskBase string) {
 	out, err := monc.run("device_del " + diskBase)
 	if err != nil {
@@ -345,7 +353,11 @@ func (QemuTest) Mke2fs(t *testing.T) {
 		t.Fatalf("mount: %v", err)
 	}
 
-	t.Logf("Final state: %s", lsblk(t))
+	t.Logf("post-mount state: %s", lsblk(t))
+
+	monc.resizeDisk(t, "foo", "200G")
+
+	t.Logf("post-resize state: %s", lsblk(t))
 
 	if err := unix.Unmount("/mnt/a/", 0); err != nil {
 		t.Fatalf("unmount: %v", err)
