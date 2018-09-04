@@ -192,6 +192,7 @@ func TestInQemu(t *testing.T) {
 		"-monitor", "unix:"+monSockPath+",server,nowait",
 		"-device", "virtio-net,netdev=net0",
 		"-netdev", "user,id=net0,guestfwd=tcp:10.0.2.100:1234-tcp:"+ln.Addr().String(),
+		"-device", "virtio-rng-pci",
 		"-device", "virtio-serial",
 		"-device", "virtio-scsi-pci,id=scsi",
 		"-kernel", kernelPath,
