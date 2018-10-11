@@ -99,7 +99,10 @@ func (p partitionResizer) Resize() error {
 		return fmt.Errorf("unsupported partition table type %q on %s", t, diskDev)
 	}
 
-	part := pt.parts[len(pt.parts)-1]
+	part, ok := pt.lastNonZeroPartition()
+	if !ok {
+		return fmt.Errorf("no non-zero partition found on %s", diskDev)
+	}
 	partDev = part.dev
 	lastType := part.Type()
 
@@ -250,6 +253,19 @@ func (pt *partitionTable) Write(w io.Writer) error {
 	return err
 }
 
+func (pt *partitionTable) lastNonZeroPartition() (part sfdiskLine, ok bool) {
+	for i := len(pt.parts) - 1; i >= 0; i-- {
+		part = pt.parts[i]
+		if part.Type() == "0" && part.Start() == 0 && part.Size() == 0 {
+			// Skip useless partitions.
+			// See https://github.com/google/embiggen-disk/issues/6#issuecomment-429055087
+			continue
+		}
+		return part, true
+	}
+	return
+}
+
 type sfdiskLine struct {
 	dev  string   // "/dev/sda1"
 	attr []string // key=value or key ("type=83", "bootable", "size=497664")
@@ -295,7 +311,16 @@ func (sl sfdiskLine) AttrInt64(key string) int64 {
 	return n
 }
 
-func (sl sfdiskLine) Type() string { return sl.Attr("type") }
+func (sl sfdiskLine) Type() string {
+	// sfdisk from util-linux 2.29.2 on Debian under Proxmox/Qemu reports type:
+	v := sl.Attr("type")
+	if v != "" {
+		return v
+	}
+	// But sfdisk from util-linux 2.23.2 on CentOS 7.5 on Azure uses "Id":
+	return sl.Attr("Id")
+}
+
 func (sl sfdiskLine) Start() int64 { return sl.AttrInt64("start") }
 func (sl sfdiskLine) Size() int64  { return sl.AttrInt64("size") }
 
