@@ -19,6 +19,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strconv"
@@ -41,10 +42,7 @@ func (r lvResizer) state() (s lvState, err error) {
 	//   /dev/debvg/root:debvg:3:1:-1:1:8434778112:1029636:-1:0:-1:254:0
 	outb, err := exec.Command("lvdisplay", "-c", s.dev).Output()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
-			err = fmt.Errorf("%v; stderr: %s", err, ee.Stderr)
-		}
-		return s, fmt.Errorf("running lvdisplay -c %s: %v", s.dev, err)
+		return s, fmt.Errorf("running lvdisplay -c %s: %v", s.dev, execErrDetail(err))
 	}
 	f := strings.Split(strings.TrimSpace(string(outb)), ":")
 	if len(f) < 13 {
@@ -66,10 +64,7 @@ func (r lvResizer) DepResizer() (Resizer, error) {
 
 	out, err := exec.Command("pvdisplay", "-c").Output()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && len(ee.Stderr) > 0 {
-			err = fmt.Errorf("%v; stderr: %s", err, ee.Stderr)
-		}
-		return nil, fmt.Errorf("running pvdisplay -c: %v", err)
+		return nil, fmt.Errorf("running pvdisplay -c: %v", execErrDetail(err))
 	}
 	bs := bufio.NewScanner(bytes.NewReader(out))
 	for bs.Scan() {
@@ -124,8 +119,7 @@ func (r pvResizer) State() (string, error) {
 	dev := string(r)
 	out, err := exec.Command("pvdisplay", "-c", dev).Output()
 	if err != nil {
-		// TODO: factor out ExitError.Stderr handling above & use here.
-		return "", err
+		return "", errors.New(execErrDetail(err))
 	}
 	f := strings.Split(strings.TrimSpace(string(out)), ":")
 	if len(f) < 3 {

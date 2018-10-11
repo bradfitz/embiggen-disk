@@ -113,6 +113,10 @@ func statFS(mnt string) (fs fsStat, err error) {
 		if len(f) < 3 {
 			continue
 		}
+		if f[0] == "rootfs" {
+			// See https://github.com/google/embiggen-disk/issues/6
+			continue
+		}
 		if f[1] == mnt {
 			fs.mnt = mnt
 			fs.dev = f[0]

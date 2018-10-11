@@ -77,6 +77,23 @@ func (p partitionResizer) Resize() error {
 	case "dos":
 	case "gpt":
 		isGPT = true
+	case "":
+		// Old version of sfdisk? See https://github.com/google/embiggen-disk/issues/6
+		// Use blkid to figure out what it is.
+		// But only trust the value "dos", because if it's gpt and sfdisk
+		// is old and doesn't support gpt, we don't want to use that old sfdisk
+		// to manipulate the gpt tables.
+		out, err := exec.Command("blkid", "-o", "export", diskDev).Output()
+		if err != nil {
+			return fmt.Errorf("error running blkid: %v", execErrDetail(err))
+		}
+		m := regexp.MustCompile(`(?m)^PTTYPE=(.+)\n`).FindSubmatch(out)
+		if m == nil {
+			return fmt.Errorf("`blkid -o export %s` lacked PTTYPE line, got: %s", diskDev, out)
+		}
+		if got := string(m[1]); got != "dos" {
+			return fmt.Errorf("Old sfdisk and `blkid -o export %s` reports unexpected PTTYPE=%s", got)
+		}
 	default:
 		// It might work, but fail as a precaution. Untested.
 		return fmt.Errorf("unsupported partition table type %q on %s", t, diskDev)
