@@ -92,7 +92,7 @@ func (p partitionResizer) Resize() error {
 			return fmt.Errorf("`blkid -o export %s` lacked PTTYPE line, got: %s", diskDev, out)
 		}
 		if got := string(m[1]); got != "dos" {
-			return fmt.Errorf("Old sfdisk and `blkid -o export %s` reports unexpected PTTYPE=%s", got)
+			return fmt.Errorf("Old sfdisk and `blkid -o export %s` reports unexpected PTTYPE=%s", diskDev, got)
 		}
 	default:
 		// It might work, but fail as a precaution. Untested.
