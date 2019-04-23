@@ -38,6 +38,7 @@ import (
 const (
 	lvmGPTTypeID       = "E6D6D379-F507-44C2-A23C-238F2A3DF928"
 	rootx8664GPTTypeID = "4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709"
+	linuxGPTTypeID     = "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
 )
 
 type partitionResizer string // "/dev/sda3"
@@ -108,7 +109,7 @@ func (p partitionResizer) Resize() error {
 
 	if isGPT {
 		switch lastType {
-		case lvmGPTTypeID, rootx8664GPTTypeID:
+		case lvmGPTTypeID, rootx8664GPTTypeID, linuxGPTTypeID:
 		default:
 			return fmt.Errorf("unknown GPT partition type %q for %s", lastType, part.dev)
 		}
