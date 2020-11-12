@@ -48,10 +48,17 @@ func diskDev(partDev string) string {
 	if !strings.HasPrefix(partDev, "/dev/") {
 		panic("bogus partition dev " + partDev)
 	}
-	if !strings.HasPrefix(partDev, "/dev/sd") {
-		panic("TODO: handle other device types; ask kernel")
+	if strings.HasPrefix(partDev, "/dev/sd") {
+		return strings.TrimRight(partDev, "0123456789")
 	}
-	return strings.TrimRight(partDev, "0123456789")
+	if strings.HasPrefix(partDev, "/dev/nvme") {
+		chopP := regexp.MustCompile(`p\d+$`)
+		if !chopP.MatchString(partDev) {
+			panic(fmt.Sprintf("partition %q doesn't look like an nvme partition", partDev))
+		}
+		return chopP.ReplaceAllString(partDev, "")
+	}
+	panic(fmt.Sprintf("Unsupport device %q; TODO: handle other device types; ask kernel", partDev))
 }
 
 func (p partitionResizer) String() string { return fmt.Sprintf("partition %s", string(p)) }
@@ -67,12 +74,15 @@ func (p partitionResizer) State() (string, error) {
 func (p partitionResizer) DepResizer() (Resizer, error) { return nil, nil }
 
 func (p partitionResizer) Resize() error {
+	vlogf("Resizing partition %q ...", string(p))
 	partDev := string(p)
 	diskDev := diskDev(partDev)
+	vlogf("Getting partition table for %q ...", diskDev)
 	pt := getPartitionTable(diskDev)
 	if len(pt.parts) == 0 {
 		log.Fatalf("device %q has no partitions", diskDev)
 	}
+	vlogf("Device %q has %d partitions.", diskDev, len(pt.parts))
 	var isGPT bool
 	switch t := pt.Meta("label"); t {
 	case "dos":
@@ -127,7 +137,7 @@ func (p partitionResizer) Resize() error {
 		fmt.Println()
 	}
 
-	size, err := readInt64File("/sys/block/sda/size")
+	size, err := readInt64File("/sys/block/" + filepath.Base(diskDev) + "/size")
 	if err != nil {
 		return err
 	}
@@ -329,7 +339,7 @@ func getPartitionTable(dev string) *partitionTable {
 	pt := new(partitionTable)
 	out, err := exec.Command("/sbin/sfdisk", "-d", dev).Output()
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("running sfdisk -f %s: %v, %s", dev, err, out)
 	}
 	lines := strings.Split(string(out), "\n")
 	var pno int

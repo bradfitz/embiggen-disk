@@ -22,9 +22,11 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"golang.org/x/sys/unix"
 )
@@ -61,14 +63,20 @@ func (e fsResizer) String() string {
 func (e fsResizer) DepResizer() (Resizer, error) {
 	// TODO: use /proc/devices instead and stat the thing to
 	// figure out what it is, rather than using its name.
-	if strings.HasPrefix(e.fs.dev, "/dev/sd") && devEndsInNumber(e.fs.dev) {
-		return partitionResizer(e.fs.dev), nil
+	dev := e.fs.dev
+	if dev == "/dev/root" {
+		return nil, errors.New("unexpected device /dev/root from statFS")
 	}
-	if strings.HasPrefix(e.fs.dev, "/dev/mapper") ||
-		strings.HasPrefix(filepath.Base(e.fs.dev), "dm-") {
-		return lvResizer(e.fs.dev), nil
+	if (strings.HasPrefix(dev, "/dev/sd") || strings.HasPrefix(dev, "/dev/nvme")) &&
+		devEndsInNumber(dev) {
+		vlogf("fsResizer.DepResizer: returning partitionResizer(%q)", dev)
+		return partitionResizer(dev), nil
 	}
-	return nil, fmt.Errorf("don't know how to resize block device %q", e.fs.dev)
+	if strings.HasPrefix(dev, "/dev/mapper") ||
+		strings.HasPrefix(filepath.Base(dev), "dm-") {
+		return lvResizer(dev), nil
+	}
+	return nil, fmt.Errorf("don't know how to resize block device %q", dev)
 }
 
 func (e fsResizer) Resize() error {
@@ -121,8 +129,40 @@ func statFS(mnt string) (fs fsStat, err error) {
 			fs.mnt = mnt
 			fs.dev = f[0]
 			fs.fstype = f[2]
-			return fs, nil
+			if fs.dev == "/dev/root" {
+				dev, err := findDevRoot()
+				if err != nil {
+					return fs, fmt.Errorf("failed to map /dev/root to real device: %v", err)
+				}
+				fs.dev = dev
+			}
+			return fs, err
 		}
 	}
 	return fs, errors.New("mount point not found")
+}
+
+// findDevRoot finds which block device (e.g. "/dev/nvme0n1p1") patches the device number of /dev/root.
+func findDevRoot() (string, error) {
+	fis, err := ioutil.ReadDir("/dev")
+	if err != nil {
+		return "", err
+	}
+	dev := map[string]uint64{}
+	for _, fi := range fis {
+		if fi.Mode()&os.ModeDevice == 0 || fi.Mode()&os.ModeCharDevice != 0 {
+			continue
+		}
+		dev[fi.Name()] = fi.Sys().(*syscall.Stat_t).Rdev
+	}
+	wantDevnum, ok := dev["root"]
+	if !ok {
+		return "", errors.New("/dev/root not found in /dev")
+	}
+	for baseName, devNum := range dev {
+		if devNum == wantDevnum && baseName != "root" {
+			return "/dev/" + baseName, nil
+		}
+	}
+	return "", errors.New("no block device in /dev had device number like /dev/root")
 }

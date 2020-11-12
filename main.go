@@ -51,6 +51,12 @@ func fatalf(format string, args ...interface{}) {
 	log.Fatalf(format, args...)
 }
 
+func vlogf(format string, args ...interface{}) {
+	if *verbose {
+		log.Printf(format, args...)
+	}
+}
+
 func main() {
 	flag.Parse()
 	if flag.NArg() != 1 {
@@ -62,6 +68,7 @@ func main() {
 
 	mnt := flag.Arg(0)
 	e, err := getFileSystemResizer(mnt)
+	vlogf("getFileSystemResizer(%q) = %#v, %v", mnt, e, err)
 	if err != nil {
 		fatalf("error preparing to enlarge %s: %v", mnt, err)
 	}
