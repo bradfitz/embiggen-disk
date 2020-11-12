@@ -24,8 +24,16 @@ No changes made.
 
 # Installing
 
+With Go 1.15 and earlier:
+
 ```
-$ go get github.com/google/embiggen-disk
+$ go get github.com/bradfitz/embiggen-disk
+```
+
+With Go 1.16+:
+
+```
+$ go install github.com/bradfitz/embiggen-disk@latest
 ```
 
 # Requirements
@@ -37,7 +45,5 @@ It's only been tested on 64-bit x86 Linux ("amd64"). It should work on
 other Linux architectures.
 
 # Disclaimer
-
-This is not an officially supported Google product.
 
 Audit the code and/or snapshot your disk before use if you're worried about losing data.
