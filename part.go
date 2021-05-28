@@ -51,6 +51,11 @@ func diskDev(partDev string) string {
 	if strings.HasPrefix(partDev, "/dev/sd") {
 		return strings.TrimRight(partDev, "0123456789")
 	}
+	if strings.HasPrefix(partDev, "/dev/mmcblk") {
+		v := strings.TrimRight(partDev, "0123456789")
+		v = strings.TrimSuffix(v, "p")
+		return v
+	}
 	if strings.HasPrefix(partDev, "/dev/nvme") {
 		chopP := regexp.MustCompile(`p\d+$`)
 		if !chopP.MatchString(partDev) {
