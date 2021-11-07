@@ -68,6 +68,7 @@ func (e fsResizer) DepResizer() (Resizer, error) {
 		return nil, errors.New("unexpected device /dev/root from statFS")
 	}
 	if (strings.HasPrefix(dev, "/dev/sd") ||
+		strings.HasPrefix(dev, "/dev/vd") ||
 		strings.HasPrefix(dev, "/dev/mmcblk") ||
 		strings.HasPrefix(dev, "/dev/nvme")) &&
 		devEndsInNumber(dev) {
