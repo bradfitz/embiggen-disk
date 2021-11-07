@@ -48,7 +48,7 @@ func diskDev(partDev string) string {
 	if !strings.HasPrefix(partDev, "/dev/") {
 		panic("bogus partition dev " + partDev)
 	}
-	if strings.HasPrefix(partDev, "/dev/sd") {
+	if strings.HasPrefix(partDev, "/dev/sd") || strings.HasPrefix(partDev, "/dev/vd") {
 		return strings.TrimRight(partDev, "0123456789")
 	}
 	if strings.HasPrefix(partDev, "/dev/nvme") {
