@@ -135,7 +135,12 @@ func statFS(mnt string) (fs fsStat, err error) {
 			if fs.dev == "/dev/root" {
 				dev, err := findDevRoot()
 				if err != nil {
-					return fs, fmt.Errorf("failed to map /dev/root to real device: %v", err)
+					// last-ditch recovery
+					out, err := exec.Command("findmnt", "-n", "-o", "SOURCE", mnt).Output()
+					if err != nil || len(out) < 2 {
+						return fs, fmt.Errorf("failed to map /dev/root to real device: %v", err)
+					}
+					dev = strings.Split(string(out), "\n")[0]
 				}
 				fs.dev = dev
 			}
