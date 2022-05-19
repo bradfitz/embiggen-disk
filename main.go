@@ -33,6 +33,9 @@ import (
 var (
 	dry     = flag.Bool("dry-run", false, "don't make changes")
 	verbose = flag.Bool("verbose", false, "verbose output")
+
+	noResizePartition     = flag.Bool("no-resize-partition", false, "disable resizing partitions")
+	ignoreResizePartition = flag.Bool("ignore-resize-partition", false, "ignore resize partition errors")
 )
 
 func init() {
