@@ -157,13 +157,15 @@ func statFS(mnt string) (fs fsStat, err error) {
 
 // statFSFindmnt uses findmnt to stat the filesystem.
 func statFSFindmnt(mnt string) (fs fsStat, err error) {
-	out, err := exec.Command(
+	cmd := exec.Command(
 		"findmnt",
 		"--noheadings",
 		"--output", "FSTYPE,SOURCE",
 		"-J",
 		mnt,
-	).Output()
+	)
+	vlogf("statFSFindmnt: running(%s)", cmd.String())
+	out, err := cmd.Output()
 	if err != nil {
 		return fs, fmt.Errorf("error running findmnt: %v", execErrDetail(err))
 	}
