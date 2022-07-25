@@ -28,6 +28,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/bradfitz/embiggen-disk/findmnt"
 	"golang.org/x/sys/unix"
 )
 
@@ -40,6 +41,8 @@ func getFileSystemResizer(mnt string) (Resizer, error) {
 	switch fs.fstype {
 	case "ext2", "ext3", "ext4":
 		cmd = exec.Command("resize2fs", fs.dev)
+		// pass EXT2FS_PRETEND_... variables
+		cmd.Env = os.Environ()
 		return fsResizer{fs, cmd}, nil
 	case "xfs":
 		cmd = exec.Command("xfs_growfs", "-d", fs.mnt)
@@ -110,10 +113,16 @@ type fsStat struct {
 }
 
 func statFS(mnt string) (fs fsStat, err error) {
+	fs, err = statFSFindmnt(mnt)
+	if err != nil || fs.dev != "" {
+		return fs, err
+	}
+
 	err = unix.Statfs(mnt, &fs.statfs)
 	if err != nil {
 		return
 	}
+
 	mounts, err := ioutil.ReadFile("/proc/mounts")
 	if err != nil {
 		return
@@ -129,9 +138,6 @@ func statFS(mnt string) (fs fsStat, err error) {
 			continue
 		}
 		if f[1] == mnt {
-			fs.mnt = mnt
-			fs.dev = f[0]
-			fs.fstype = f[2]
 			if fs.dev == "/dev/root" {
 				dev, err := findDevRoot()
 				if err != nil {
@@ -139,10 +145,51 @@ func statFS(mnt string) (fs fsStat, err error) {
 				}
 				fs.dev = dev
 			}
+			fs.mnt = mnt
+			fs.dev = f[0]
+			fs.fstype = f[2]
 			return fs, err
 		}
 	}
+
 	return fs, errors.New("mount point not found")
+}
+
+// statFSFindmnt uses findmnt to stat the filesystem.
+func statFSFindmnt(mnt string) (fs fsStat, err error) {
+	cmd := exec.Command(
+		"findmnt",
+		"--noheadings",
+		"--output", "FSTYPE,SOURCE",
+		"-J",
+		mnt,
+	)
+	vlogf("statFSFindmnt: running(%s)", cmd.String())
+	out, err := cmd.Output()
+	if err != nil {
+		return fs, fmt.Errorf("error running findmnt: %v", execErrDetail(err))
+	}
+
+	var output findmnt.Output
+	if len(out) > 2 {
+		err = (&output).UnmarshalJSON(out)
+		if err != nil {
+			return fs, fmt.Errorf("error parsing findmnt output: %v", err)
+		}
+	}
+
+	fsInfo := &output.Filesystems[0]
+	if len(fsInfo.Fstype) != 0 {
+		fs.mnt = mnt
+		fs.fstype = fsInfo.Fstype
+		fs.dev = fsInfo.Source
+	}
+
+	if fs.dev == "" {
+		return fs, errors.New("mount point not found")
+	}
+
+	return fs, nil
 }
 
 // findDevRoot finds which block device (e.g. "/dev/nvme0n1p1") patches the device number of /dev/root.

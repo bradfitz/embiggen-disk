@@ -41,6 +41,11 @@ const (
 	linuxGPTTypeID     = "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
 )
 
+const (
+	FdiskPath  = "/sbin/fdisk"
+	SfdiskPath = "/sbin/sfdisk"
+)
+
 type partitionResizer string // "/dev/sda3"
 
 // diskDev maps "/dev/sda3" to "/dev/sda".
@@ -78,14 +83,29 @@ func (p partitionResizer) State() (string, error) {
 
 func (p partitionResizer) DepResizer() (Resizer, error) { return nil, nil }
 
-func (p partitionResizer) Resize() error {
+func (p partitionResizer) Resize() (rerr error) {
+	if *noResizePartition {
+		vlogf("Skipping resizing %q: no-resize-partition is set", string(p))
+		return nil
+	}
+	if *ignoreResizePartition {
+		defer func() {
+			if rerr != nil {
+				vlogf("Ignoring error resizing %q: %v", string(p), rerr)
+				rerr = nil
+			}
+		}()
+	}
 	vlogf("Resizing partition %q ...", string(p))
 	partDev := string(p)
 	diskDev := diskDev(partDev)
 	vlogf("Getting partition table for %q ...", diskDev)
-	pt := getPartitionTable(diskDev)
+	pt, err := getPartitionTable(diskDev)
+	if err != nil {
+		return err
+	}
 	if len(pt.parts) == 0 {
-		log.Fatalf("device %q has no partitions", diskDev)
+		return fmt.Errorf("device %q has no partitions", diskDev)
 	}
 	vlogf("Device %q has %d partitions.", diskDev, len(pt.parts))
 	var isGPT bool
@@ -196,7 +216,7 @@ func (p partitionResizer) Resize() error {
 		cmd.Stderr = &outBuf
 	}
 	if err := cmd.Run(); err != nil {
-		log.Fatalf("sfdisk: %v: %s", err, outBuf.Bytes())
+		return fmt.Errorf("sfdisk: %v: %s", err, outBuf.Bytes())
 	}
 
 	// Tell the kernel.
@@ -340,11 +360,11 @@ func (sl sfdiskLine) Type() string {
 func (sl sfdiskLine) Start() int64 { return sl.AttrInt64("start") }
 func (sl sfdiskLine) Size() int64  { return sl.AttrInt64("size") }
 
-func getPartitionTable(dev string) *partitionTable {
+func getPartitionTable(dev string) (*partitionTable, error) {
 	pt := new(partitionTable)
 	out, err := exec.Command("/sbin/sfdisk", "-d", dev).Output()
 	if err != nil {
-		log.Fatalf("running sfdisk -f %s: %v, %s", dev, err, out)
+		return nil, fmt.Errorf("running sfdisk -f %s: %v, %s", dev, err, out)
 	}
 	lines := strings.Split(string(out), "\n")
 	var pno int
@@ -375,7 +395,7 @@ func getPartitionTable(dev string) *partitionTable {
 			pt.parts = append(pt.parts, part)
 		}
 	}
-	return pt
+	return pt, nil
 }
 
 var eqRx = regexp.MustCompile(`\s*=\s*`)
