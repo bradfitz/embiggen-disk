@@ -39,6 +39,7 @@ const (
 	lvmGPTTypeID       = "E6D6D379-F507-44C2-A23C-238F2A3DF928"
 	rootx8664GPTTypeID = "4F68BCE3-E8CD-4DB1-96E7-FBCAF984B709"
 	linuxGPTTypeID     = "0FC63DAF-8483-4772-8E79-3D69D8477DE4"
+	xbootldrGPTTypeID  = "BC13C2FF-59E6-4262-A352-B275FD6F7172"
 )
 
 type partitionResizer string // "/dev/sda3"
@@ -115,16 +116,19 @@ func (p partitionResizer) Resize() error {
 		return fmt.Errorf("unsupported partition table type %q on %s", t, diskDev)
 	}
 
-	part, ok := pt.lastNonZeroPartition()
+	part, ok := pt.findPartition(partDev)
 	if !ok {
-		return fmt.Errorf("no non-zero partition found on %s", diskDev)
+		return fmt.Errorf("partition %s not found in partition table of %s", partDev, diskDev)
 	}
-	partDev = part.dev
+	if after, ok := pt.partitionAfter(part); ok {
+		return fmt.Errorf("cannot resize %s: partition %s starts after it (at sector %d); only the physically last partition on a disk can be extended",
+			part.dev, after.dev, after.Start())
+	}
 	lastType := part.Type()
 
 	if isGPT {
 		switch lastType {
-		case lvmGPTTypeID, rootx8664GPTTypeID, linuxGPTTypeID:
+		case lvmGPTTypeID, rootx8664GPTTypeID, linuxGPTTypeID, xbootldrGPTTypeID:
 		default:
 			return fmt.Errorf("unknown GPT partition type %q for %s", lastType, part.dev)
 		}
@@ -267,6 +271,31 @@ func (pt *partitionTable) Write(w io.Writer) error {
 	}
 	_, err := w.Write(buf.Bytes())
 	return err
+}
+
+func (pt *partitionTable) findPartition(dev string) (part sfdiskLine, ok bool) {
+	for _, p := range pt.parts {
+		if p.dev == dev {
+			return p, true
+		}
+	}
+	return
+}
+
+// partitionAfter reports whether any other partition on the disk starts at or
+// after the end of p. If so, it returns that partition. This is used as a
+// safety check: only the physically last partition can be extended.
+func (pt *partitionTable) partitionAfter(p sfdiskLine) (after sfdiskLine, ok bool) {
+	end := p.Start() + p.Size()
+	for _, other := range pt.parts {
+		if other.dev == p.dev {
+			continue
+		}
+		if other.Start() >= end {
+			return other, true
+		}
+	}
+	return
 }
 
 func (pt *partitionTable) lastNonZeroPartition() (part sfdiskLine, ok bool) {
